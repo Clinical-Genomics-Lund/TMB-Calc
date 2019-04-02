@@ -83,38 +83,38 @@ if (defined $options{o}) {
 }
 ############################################################################
 
-# TALLY ALL SAMPLES IN POOL (LEGACY?) ######################################
-my @all_samples;
-my $list_samples = "samples.txt";
-open (my $fh2, '<', $list_samples)
-	or die "Could not open file $list_samples";
-while (my $line = <$fh2>) {
-	chomp $line;
-	push @all_samples, $line;
-}
-close $fh2;
-my %all;
-foreach my $file (@all_samples) {
-	chomp $file;
-	open (my $fh3, '<', $file)
-		or die "Could not open file $file";
-	if ($file =~ /\S+\/(\S+)\.vcf/) { $file = $1; }
-	while (my $line = <$fh3>) {
-		chomp $line;
-		if ($line =~ /^([0-9XY]{1,2})\t(\d+)\t(\S+|\.)\t(\S+)\t(\S+)\t[\.0-9]+\t/) {
+# # TALLY ALL SAMPLES IN POOL (LEGACY?) ######################################
+# my @all_samples;
+# my $list_samples = "samples.txt";
+# open (my $fh2, '<', $list_samples)
+# 	or die "Could not open file $list_samples";
+# while (my $line = <$fh2>) {
+# 	chomp $line;
+# 	push @all_samples, $line;
+# }
+# close $fh2;
+# my %all;
+# foreach my $file (@all_samples) {
+# 	chomp $file;
+# 	open (my $fh3, '<', $file)
+# 		or die "Could not open file $file";
+# 	if ($file =~ /\S+\/(\S+)\.vcf/) { $file = $1; }
+# 	while (my $line = <$fh3>) {
+# 		chomp $line;
+# 		if ($line =~ /^([0-9XY]{1,2})\t(\d+)\t(\S+|\.)\t(\S+)\t(\S+)\t[\.0-9]+\t/) {
 		
-			my $variant = $1.":".$2.":".$5;
-			if (defined $all{$variant}) {
-				$all{$variant}++;
-			}
-			else {
-				$all{$variant} = 0;
-			}	
-		}
-	}
-close $fh3;
-}
-############################################################################
+# 			my $variant = $1.":".$2.":".$5;
+# 			if (defined $all{$variant}) {
+# 				$all{$variant}++;
+# 			}
+# 			else {
+# 				$all{$variant} = 0;
+# 			}	
+# 		}
+# 	}
+# close $fh3;
+# }
+# ############################################################################
 
 # LEGACY REMOVE WHEN APPROPRIATE ###########################################
 $filename =~ s/_vep\.vcf//;
@@ -201,7 +201,7 @@ foreach my $line (@variants) {
 				$count_canon = $count_canon + $somatic;
 				my $check_vaf = vaf($SENTION,$tumor_conc);
 				
-				if ($check_exac == 1 && $check_vaf == 1 && $all{$variant} < 3) {
+				if ($check_exac == 1 && $check_vaf == 1) {
 
 					if (defined $options{b}) {
 						$depth_filt = coverage($variant, $bam, $depth_cutoff);
