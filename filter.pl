@@ -116,20 +116,15 @@ if (defined $options{o}) {
 # }
 # ############################################################################
 
-# LEGACY REMOVE WHEN APPROPRIATE ###########################################
-$filename =~ s/_vep\.vcf//;
-print $filename,"\n";
+# Some variables coding size needs to be incorporated as a real variable.
 my $pass_filter = 0;
-my %samples = ("UMEA11" => "0.90","UMEA5" => "0.40","UA15" => "0.20","UMEA8" => "0.90","UA05" => "0.25","UA04" => "0.25","GBG9" => "0.80","LUND2" => "0.70","UA18" => "0.40","GBG2" => "0.90","UA16" => "0.40","UA14" => "0.30","UA19" => "0.40", "UA10" => "0.25","GBG11" => "0.60", "HD799" => "1.00");
-
-print $samples{$filename}, "\n";
 my $coding_size = 1.421418;
 my $notfilt = 0;
 my $filt = 0;
-############################################################################
+
 
 # TUMOR SUPPRESSOR GENES FILTER HASH #######################################
-my $tumor_sup = "/data/trannel/proj/tmb/tumor_suppressor_genes.txt";
+my $tumor_sup = "supporting_files/tumor_suppressor_genes.txt";
 open (my $fh4, '<', $tumor_sup) or die "Could not open $tumor_sup\n";
 my %tumor_SUPP;
 print STDOUT "LOADING TUMOR SUPPRESSOR GENES $tumor_sup\n";
@@ -141,7 +136,7 @@ while (my $row = <$fh4>) {
 close $fh4;
 ############################################################################
 # COSMIC SOMATIC VARIANTS FILTER HASH ######################################
-my $cosmic = "/data/bnf/sw/annovar/b37_cosmic_v54_120711.vcf";
+my $cosmic = "supporting_files/b37_cosmic_v54_120711.vcf";
 open (my $fh5, '<', $cosmic) or  die "Could not open $cosmic";
 my %COSMIC;
 print STDOUT "LOADING COSMIC VARIANTS $cosmic\n";
