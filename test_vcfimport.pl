@@ -1,10 +1,10 @@
 #!/usr/bin/perl -w
 use strict;
-use CMD::vcf2;
+use bin::vcf2;
 use Data::Dumper;
 use Getopt::Std;
-#use File::Basename;
-#use lib dirname (__FILE__) . "/bin";
+use File::Basename;
+use lib dirname (__FILE__) . "/bin";
 
 my %options= ();
 getopts("hc:st:b:v:e:o:", \%options);
