@@ -3,33 +3,28 @@ use strict;
 use CMD::vcf2;
 use Data::Dumper;
 use Getopt::Std;
-#use List::UtilsBy qw(max_by);
+#use File::Basename;
+#use lib dirname (__FILE__) . "/bin";
 
 my %options= ();
 getopts("hc:st:b:v:e:o:", \%options);
 
 if ($options{h}) { my $send = options_manager();}
-my $count_canon = 0;  ##Legacy
-print STDOUT "./filter.pl ";
-# # HANDLE VCF ##############################################################
-# my $filename; #REQUIRED
-# if ($options{v}) { 
-# 	$filename = $options{v}; 
-# 	print STDOUT "$filename ";
-# }
-# else { 
-# 	print STDERR "MISSING VCF\n";
-# 	exit;
-# }
-# my @variants;
-# open (my $fh, '<', $filename)
-# 	or die "Could not open file $filename";
-# while (my $line = <$fh>) {
-# 	chomp $line;
-# 	push @variants, $line;
-# }
-# close $fh;
-# ############################################################################
+
+print STDERR "./filter.pl ";
+# HANDLE VCF ###############################################################
+my $vcf_file;
+if ($options{v}) { 
+	$vcf_file = $options{v}; 
+	print STDERR "-v $vcf_file ";
+}
+else { 
+	print STDERR "MISSING VCF\n";
+	exit;
+}
+my $vcf = CMD::vcf2->new('file'=> $vcf_file );
+############################################################################
+
 
 # HANDLE BAM ###############################################################
 my $bam;
@@ -54,7 +49,7 @@ if (defined $options{e}) {
 	print STDERR "-e $exac_cutoff "
 } #Lägg till kontroll för numeric value
 else {
-	print STDERR "-(ExAC Default) $exac_cutoff \n"
+	print STDERR "-e $exac_cutoff(ExAC Default) "
 }
 ############################################################################
 
@@ -62,6 +57,7 @@ else {
 my $tumor_conc;
 if (defined $options{t}) {
 	$tumor_conc = $options{t};
+    print STDERR "-t $tumor_conc "
 } #Lägg till kontroll för numeric value
 else {
 	print STDERR "Need to define tumor concentration\n";
@@ -72,7 +68,7 @@ else {
 # SYNONYMOUS MUT? ##########################################################
 my $syn = 0;
 if (defined $options{s}) {
-	print STDERR "Excluding Synonymous Variants\n";
+	print STDERR "-s (non-syn) ";
 }
 ############################################################################
 
@@ -98,7 +94,7 @@ my $filt = 0;
 my $tumor_sup = "supporting_files/tumor_suppressor_genes.txt";
 open (my $fh4, '<', $tumor_sup) or die "Could not open $tumor_sup\n";
 my %tumor_SUPP;
-print STDOUT "LOADING TUMOR SUPPRESSOR GENES $tumor_sup\n";
+print STDERR "\nLOADING TUMOR SUPPRESSOR GENES $tumor_sup\n";
 while (my $row = <$fh4>) {
 	if ($row =~ /^(\d+)\t(\w+)\t/) {
 		$tumor_SUPP{$1} = $2;
@@ -110,7 +106,7 @@ close $fh4;
 my $cosmic = "supporting_files/b37_cosmic_v54_120711.vcf";
 open (my $fh5, '<', $cosmic) or  die "Could not open $cosmic";
 my %COSMIC;
-print STDOUT "LOADING COSMIC VARIANTS $cosmic\n";
+print STDERR "LOADING COSMIC VARIANTS $cosmic\n";
 while (my $row = <$fh5>) {
 	if ( $row =~ /^([0-9XY]+)\t(\d+)\t\S+\t(\w+)\t(\w+)/) {
 		$COSMIC{"$1:$2"} = "$4";
@@ -119,52 +115,42 @@ while (my $row = <$fh5>) {
 close $fh5;
 ############################################################################
 
-# HANDLE VCF ###############################################################
-my $vcf_file;
-if ($options{v}) { 
-	$vcf_file = $options{v}; 
-	print STDOUT "$vcf_file \n";
-}
-else { 
-	print STDERR "MISSING VCF\n";
-	exit;
-}
-my $vcf = CMD::vcf2->new('file'=> $vcf_file );
-############################################################################
 
+
+my $CF = 0;
+my $TGF = 0;
+my $EF = 0;
+my $VF = 0;
+my $SF = 0;
 ### MAINSCRIPT ENSUES ###
 my $c = 0;
  while ( my $a = $vcf->next_var() ) {
-     $c++;
-     #print Dumper($a);
-     #print $a->{INFO}->{CSQ}->[0]->{Consequence},"\n";
-
-     #if( grep /^synonymous_variant$/, $a->{INFO}->{CSQ}->[0]->{Consequence} ) {
-
-   
-
-
- 	my $ref = $a->{REF};
+    $c++;
+    #print Dumper($a);
+    my $ref = $a->{REF};
  	my $alt = $a->{ALT};
     my $pos = $a->{POS};
     my $chrom =  $a->{CHROM};
-    print "$c PEN_______________________ $chrom\t$pos  __________________________\n";
-    if ($c > 10000 ) {exit;}
+    #print "$c PEN_______________________ $chrom\t$pos  __________________________\n";
+    #if ($c > 10000 ) {exit;}
     ## VAF ###########################################################
     ## id of sample is saved as only key for $a->{GT} need to retrieve
     my @keys = keys %{$a -> {GT}};
     my $VAF = $a->{GT} -> {$keys[0]} -> {AF};
     if(! defined $VAF) {next;}
-    print $VAF/$tumor_conc;
     my $check_vaf = vaf($VAF,$tumor_conc);
-    print "\t",$check_vaf,"\n";
-    if ($check_vaf == 0) {print "VAF!\n"; next;}
+    if ($check_vaf == 0) {
+        $VF++;
+        #print "VAF!\n";
+        next;
+    }
     ##################################################################
 
     ## REMOVE COSMIC VARIANTS ###########
 	if (defined $COSMIC{"$chrom:$pos"}) { 
     	if ($alt eq $COSMIC{"$chrom:$pos"} ) {
-            print "COSMIC!\n";
+            $CF++;
+            #print "COSMIC!\n";
             next;
         }
     }
@@ -178,7 +164,8 @@ my $c = 0;
     ## SYNONYMOUS VARIANTS REMOVE IF OPTION -s ###
     if (defined $options{s}) {
         if ($score_conq > 2) {
-            print "SYN! \n";
+            $SF++;
+            #print "SYN! \n";
             next;
         }
     }
@@ -189,7 +176,8 @@ my $c = 0;
     my $is_tumor = 0;
     if (defined $tumor_SUPP{$hgnc_id}) { $is_tumor = 1;}
     if ($score_conq < 2 && $is_tumor == 1) {
-        print "TUM! \n";
+        $TGF++;
+        #print "TUM! \n";
         next;
     } 
     #####################################################
@@ -198,7 +186,11 @@ my $c = 0;
     my $exac_maf = $a->{INFO}->{CSQ}->[0]->{ExAC_MAF};
     my $exac_check = control_exac($exac_maf,$exac_cutoff,$alt);
     
-    if ($exac_check == 0) {print "EXAC!\n"; next;}
+    if ($exac_check == 0) {
+        $EF++;
+        #print "EXAC!\n";
+        next;
+    }
     #############################################################
     my $variant = $chrom.":".$pos;
 
@@ -206,22 +198,16 @@ my $c = 0;
         my $depth_filt = coverage($chrom, $pos, $bam, $depth_cutoff);
         if ($depth_filt == 0) { print   "DEPTH! \n"; }
     }
-# 	my $depth_filt = 1;
-
-
-    
-
-
- 	# if (defined $options{o}) {
- 	# 	if ($ /^#/ ) {
- 	# 		print $out "$_\n";
- 	# 	}
- 	# }
 
 	$pass_filter++;
 }
 
-
+print STDERR "Cosmic $CF\t";
+print STDERR "Tumor supp gene $TGF\t";
+print STDERR "ExAC $EF\t";
+print STDERR "VAF $VF\t";
+if (defined $options{s}) {print STDERR "Synonymous $SF\t";}
+print "PASSED $pass_filter/$coding_size\n";
 
 sub CSQ {
 	my ($alt,$csq,$syn) = @_;
@@ -342,8 +328,8 @@ sub options_manager {
 	print "-t\ttumour concentration REQUIRED\n";
 	print "-s\tinclude Synonymous mutations\n";
 	print "-e\tExAC MAF cutoff. Default 0.01\n";
-	print "-n\tPrint new VCF, OUTPUTPATH REQ\n";
 	print "-h\tthis help message\n";
+    print "-o\toutput filtered vcf\n";
 	exit;
 	
 
