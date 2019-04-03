@@ -1,13 +1,13 @@
-Tumor Mutational Burden Calculator
+#Tumor Mutational Burden Calculator
 
-Requirements:
+##Requirements:
 * samtools depth in path
 * VCF called by sentieon and annotated with VEP
 * Tumor concentration
 
 
-Manual
-./filter.pl -h
+##Manual:
+`./filter.pl -h`
 
 * CMD     Description
 * -v      input VCF REQUIRED
