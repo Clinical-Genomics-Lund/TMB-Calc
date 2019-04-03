@@ -3,7 +3,7 @@ use strict;
 use CMD::vcf2;
 use Data::Dumper;
 use Getopt::Std;
-use List::UtilsBy qw(max_by);
+#use List::UtilsBy qw(max_by);
 
 my %options= ();
 getopts("hc:st:b:v:e:o:", \%options);
@@ -38,7 +38,7 @@ if (defined $options{b}) {
 	if (defined $options{c}) {
 		$bam = $options{b};
 		$depth_cutoff = $options{c};
-		print STDOUT "-b $bam -c $depth_cutoff ";
+		print STDERR "-b $bam -c $depth_cutoff ";
 	}  
 	else {
 		print STDERR "missing coverage -c value\n"; 
@@ -51,10 +51,10 @@ if (defined $options{b}) {
 my $exac_cutoff = 0.01; #DEFAULT VALUE
 if (defined $options{e}) {
 	$exac_cutoff = $options{e};
-	print STDOUT "-e $exac_cutoff "
+	print STDERR "-e $exac_cutoff "
 } #Lägg till kontroll för numeric value
 else {
-	print STDOUT "-(ExAC Default) $exac_cutoff \n"
+	print STDERR "-(ExAC Default) $exac_cutoff \n"
 }
 ############################################################################
 
@@ -72,7 +72,7 @@ else {
 # SYNONYMOUS MUT? ##########################################################
 my $syn = 0;
 if (defined $options{s}) {
-	$syn = 1;
+	print STDERR "Excluding Synonymous Variants\n";
 }
 ############################################################################
 
@@ -119,6 +119,7 @@ while (my $row = <$fh5>) {
 close $fh5;
 ############################################################################
 
+# HANDLE VCF ###############################################################
 my $vcf_file;
 if ($options{v}) { 
 	$vcf_file = $options{v}; 
@@ -129,6 +130,7 @@ else {
 	exit;
 }
 my $vcf = CMD::vcf2->new('file'=> $vcf_file );
+############################################################################
 
 ### MAINSCRIPT ENSUES ###
 my $c = 0;
@@ -146,8 +148,8 @@ my $c = 0;
  	my $alt = $a->{ALT};
     my $pos = $a->{POS};
     my $chrom =  $a->{CHROM};
-    print "$c _______________________ $chrom\t$pos  __________________________\n";
-    if ($c > 100 ) {exit;}
+    print "$c PEN_______________________ $chrom\t$pos  __________________________\n";
+    if ($c > 10000 ) {exit;}
     ## VAF ###########################################################
     ## id of sample is saved as only key for $a->{GT} need to retrieve
     my @keys = keys %{$a -> {GT}};
@@ -167,21 +169,47 @@ my $c = 0;
         }
     }
     ######################################
+
+    # FIND CONSENSUS CONSEQUENCE AND SCORE ######
+    my $csq = $a->{INFO}->{CSQ};
+    my ($max_conq, $score_conq) = CSQ($alt,$csq);
+    #############################################
+
+    ## SYNONYMOUS VARIANTS REMOVE IF OPTION -s ###
+    if (defined $options{s}) {
+        if ($score_conq > 2) {
+            print "SYN! \n";
+            next;
+        }
+    }
+    ###############################################
+
     ## Check if tumor suppressor gene ###################
     my $hgnc_id = $a->{INFO}->{CSQ}->[0]->{HGNC_ID};
     my $is_tumor = 0;
     if (defined $tumor_SUPP{$hgnc_id}) { $is_tumor = 1;}
+    if ($score_conq < 2 && $is_tumor == 1) {
+        print "TUM! \n";
+        next;
+    } 
     #####################################################
-    my $consq = $a->{INFO}->{CSQ}->[0]->{Consequence};
-    #foreach my $try (@$consq) {
-    #    print $try,"\n";
-    #}
-    my $csq = $a->{INFO}->{CSQ};
-    my $vep = CSQ($alt,$csq,$syn);
+
+    ## ExAC cutoff ##############################################
+    my $exac_maf = $a->{INFO}->{CSQ}->[0]->{ExAC_MAF};
+    my $exac_check = control_exac($exac_maf,$exac_cutoff,$alt);
+    
+    if ($exac_check == 0) {print "EXAC!\n"; next;}
+    #############################################################
+    my $variant = $chrom.":".$pos;
+
+    if (defined $options{b}) {
+        my $depth_filt = coverage($chrom, $pos, $bam, $depth_cutoff);
+        if ($depth_filt == 0) { print   "DEPTH! \n"; }
+    }
 # 	my $depth_filt = 1;
 
 
-    ## ExAC cutoff 
+    
 
 
  	# if (defined $options{o}) {
@@ -190,19 +218,142 @@ my $c = 0;
  	# 	}
  	# }
 
-
-	#####################################
-	my $variant = $a->{CHROM}.":".$a->{POS}.":".$alt;
-	
-	
+	$pass_filter++;
 }
-#print $filt,"\t",$notfilt,"\n";
+
 
 
 sub CSQ {
 	my ($alt,$csq,$syn) = @_;
     
-    my %score = ("transcript_ablation"=>1,
+
+    my %conq_tally_canon;
+    my %conq_tally_nocanon;
+    my %conq_tally;
+    my $has_canon = 0;
+    foreach my $b (@$csq) {
+        ## if canon pick consensus conseqeunce or if equal most severe ^
+        if ( $b -> {CANONICAL} eq "YES" ) {
+            $has_canon = 1; 
+            my $tmp = $b->{Consequence};
+            foreach my $conq (@$tmp) {
+                if ($conq_tally_canon{$conq}) {
+                    $conq_tally_canon{$conq}++;
+                }
+                else {
+                    $conq_tally_canon{$conq} = 1;
+                }
+            }
+        }
+        ## if no canon pick consensus conseqeunce or if equal most severe ^
+        else {
+            my $tmp = $b->{Consequence};
+            foreach my $conq (@$tmp) {
+                if ($conq_tally_nocanon{$conq}) {
+                    $conq_tally_nocanon{$conq}++;
+                }
+                else {
+                    $conq_tally_nocanon{$conq} = 1;
+                }
+            }
+        }
+    }
+
+    if ($has_canon == 1) {%conq_tally = %conq_tally_canon; }
+    else {%conq_tally = %conq_tally_nocanon;}
+    
+    ## Find consensus consequence(most common from VEP, and if several equal most severe)
+    my ($max_hash, $score_max) = max_hash(%conq_tally);
+
+    return $max_hash, $score_max;
+
+}
+
+sub vaf {
+	my ($VAF, $tumorc) = @_;
+	my $check = 0;
+	if ($VAF/$tumorc > 0.05 && $VAF/$tumorc < 0.4 ) {
+		#if ($array[7] > 0 ) {
+			$check++; 
+		#}
+	}
+	return $check;
+
+}
+
+
+sub coverage {
+	my ($chrom, $pos, $bam, $depth_cutoff) = @_;
+	
+
+	my $depth_filt = 1;
+	my $output = "samtools depth ";
+	$output = $output.$bam." -r ".$chrom.":".$pos."-".$pos;
+	my $cmd = `$output`;
+	chomp $cmd;	
+	$cmd =~ s/^[0-9XY]+\s+\d+\s+//;
+	if ($cmd < $depth_cutoff) {
+		$depth_filt = 0;
+		print "$cmd\t$depth_cutoff\n";
+	}
+	
+	return $depth_filt;
+
+}
+
+
+sub control_exac {
+	my ($exac_maf,$exac_cutoff,$alt) = @_;
+	my $exac_filt = 1;
+	my $strict = 1;  ##Allele does not have to match exac allele, not implemented in %options
+
+	if ($exac_maf) {
+		if ($exac_maf =~ /[ACGT-]:/) {
+			
+			my @multi_allele = split('&',$exac_maf);
+		
+			if (@multi_allele > 1) {
+						
+				foreach my $var (@multi_allele) {
+					my @exac_allele = split(':',$var);
+					if ( $exac_allele[1] > $exac_cutoff) {
+						$exac_filt = 0;
+					}
+				}						
+			}
+			else {
+				my @exac_allele = split(':',$multi_allele[0]);
+				if ( $exac_allele[1] > $exac_cutoff) {
+						$exac_filt = 0;
+					}
+			}
+		}
+	}		
+
+	return $exac_filt;
+}
+
+sub options_manager {
+	#my $in = @_;
+
+	print "CMD\tDescription\n";
+	print "-v\tinput VCF REQUIRED\n";
+	print "-b\tinput BAM\n  -c\tcoverage cutoff REQUIRED if -b in use\n";
+	print "-t\ttumour concentration REQUIRED\n";
+	print "-s\tinclude Synonymous mutations\n";
+	print "-e\tExAC MAF cutoff. Default 0.01\n";
+	print "-n\tPrint new VCF, OUTPUTPATH REQ\n";
+	print "-h\tthis help message\n";
+	exit;
+	
+
+
+}
+
+
+sub max_hash {
+    my (%data) = @_;
+     my %score = ("transcript_ablation"=>1,
     "splice_acceptor_variant"=>1,
     "splice_donor_variant"=>1,
     "stop_gained"=>1,
@@ -238,169 +389,27 @@ sub CSQ {
     "regulatory_region_variant"=>4,
     "feature_truncation"=>4,
     "intergenic_variant"=>4 );
-    my %conq_tally_canon;
-    my %conq_tally_nocanon;
-    my %conq_tally;
-    my $has_canon = 0;
-                #if (grep /synonymous_variant/, @$tmp) {
-                #print $b -> {Allele}, $alt, "\n";
-            #}
-    foreach my $b (@$csq) {
-        
-        #if ($alt eq $b -> {Allele}) {
-            ## if canon pick consensus conseqeunce or if equal most severe ^
-            if ( $b -> {CANONICAL} eq "YES" ) {
-                $has_canon = 1;
-                
-                my $tmp = $b->{Consequence};
-                foreach my $conq (@$tmp) {
-                    if ($conq_tally_canon{$conq}) {
-                        $conq_tally_canon{$conq}++;
-                    }
-                    else {
-                     $conq_tally_canon{$conq} = 1;
-                    }
-                }
-            }
-            ## if no canon pick consensus conseqeunce or if equal most severe ^
-            else {
-                
-                my $tmp = $b->{Consequence};
-                foreach my $conq (@$tmp) {
-                    if ($conq_tally_nocanon{$conq}) {
-                        $conq_tally_nocanon{$conq}++;
-                    }
-                    else {
-                     $conq_tally_nocanon{$conq} = 1;
-                    }
-                }
-            }
-        #}
-    }
-    print scalar(keys %conq_tally_nocanon);
-    if ($has_canon == 1) {%conq_tally = %conq_tally_canon; print "HAS CANON\n";}
-    else {%conq_tally = %conq_tally_nocanon; print "NO CANON\n";}
+
     
-    foreach my $key (keys %conq_tally) {
-
-        print $key,"=", $conq_tally{$key},"\n";
+    my $max;
+    while (my ($key, $value) = each %data) {
+        if (not defined $max) {
+            $max = $key;
+            next;
+        }
+        if ($data{$max} < $value) {
+            $max = $key;
+        }
+        if ($data{$max} == $value) {
+            if ($score{$key} < $score{$max}) {
+                $max = $key;
+            }
+        }
     }
-
-			# if ($in_hash{$key}[1] =~ /missense_variant/) {
-			# }
-			# elsif ($in_hash{$key}[1] =~ /stop_gained/) {
-			# }
-			# elsif ($syn == 1) { 
-			# 	if ($in_hash{$key}[1] =~ /synonymous_variant/ ) {
-
-	#return $check, $somatic;
+    my $score_max = $score{$max};
+    return $max, $score_max;
 }
-
-sub vaf {
-	my ($VAF, $tumorc) = @_;
-	my $check = 0;
-	if ($VAF/$tumorc > 0.05 && $VAF/$tumorc < 0.4 ) {
-		#if ($array[7] > 0 ) {
-			$check++; 
-		#}
-	}
-	return $check;
-
-}
-
-
-sub coverage {
-	my @in = @_;
-	my@IN = split(":",$in[0]);
-	my $depth_cutoff = $in[2];
-	my $depth_filt = 1;
-	my $output = "samtools depth ";
-	$output = $output.$in[1]." -r ".$IN[0].":".$IN[1]."-".$IN[1];
-	my $cmd = `$output`;
-	chomp $cmd;	
-	$cmd =~ s/^[0-9XY]+\s+\d+\s+//;
-	if ($cmd < $depth_cutoff) {
-		$depth_filt = 0;
-		print "$cmd\t$depth_cutoff\n";
-	}
-	
-	return $depth_filt;
-
-}
-
-
-sub control_exac {
-	my ($exac_maf,$alt,$ref,$exac_cutoff,$csq) = @_;
-	my $exac_filt = 1;
-	my $strict = 1;  ##Allele does not have to match exac allele, not implemented in %options
-
-	if ($exac_maf) {
-		if ($exac_maf =~ /[ACGT-]:/) {
-			
-			my @multi_allele = split('&',$exac_maf);
-		
-			if (@multi_allele > 1) {
-						
-				foreach my $var (@multi_allele) {
-					my @exac_allele = split(':',$var);
-					if ($strict == 1) { 
-						if ( $exac_allele[1] > $exac_cutoff) {
-							$exac_filt = 0;
-						}
-					}
-					elsif ($alt eq $csq && $alt eq $exac_allele[0]) {
-						if ( $exac_allele[1] > $exac_cutoff) {
-							$exac_filt = 0;
-						}
-					}
-				}						
-			}
-			else {
-				my @exac_allele = split(':',$multi_allele[0]);
-				if ($strict == 1) {
-					if ( $exac_allele[1] > $exac_cutoff) {
-							$exac_filt = 0;
-						}
-				}
-				elsif ($alt eq $csq && $alt eq $exac_allele[0]) {
-					if ( $exac_allele[1] > $exac_cutoff) {
-						$exac_filt = 0;
-					}
-				}
-			}
-		}		
-	}
-
-
-
-	
-	return $exac_filt;
-
-
-
-
-}
-
-sub options_manager {
-	#my $in = @_;
-
-	print "CMD\tDescription\n";
-	print "-v\tinput VCF REQUIRED\n";
-	print "-b\tinput BAM\n  -c\tcoverage cutoff REQUIRED if -b in use\n";
-	print "-t\ttumour concentration REQUIRED\n";
-	print "-s\tinclude Synonymous mutations\n";
-	print "-e\tExAC MAF cutoff. Default 0.01\n";
-	print "-n\tPrint new VCF, OUTPUTPATH REQ\n";
-	print "-h\tthis help message\n";
-	exit;
-	
-
-
-}
-
-print $pass_filter/$coding_size,"\n";
-
-
+ 
 
 
 
