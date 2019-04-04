@@ -132,11 +132,19 @@ my $c = 0;
     my $pos = $a->{POS};
     my $chrom =  $a->{CHROM};
     #print "$c PEN_______________________ $chrom\t$pos  __________________________\n";
-    #if ($c > 10000 ) {exit;}
+    #if ($c > 10 ) {exit;}
     ## VAF ###########################################################
     ## id of sample is saved as only key for $a->{GT} need to retrieve
     my @keys = keys %{$a -> {GT}};
-    my $VAF = $a->{GT} -> {$keys[0]} -> {AF};
+	my $RO = $a->{GT} -> {$keys[0]} -> {RO};
+	my $AO = $a->{GT} -> {$keys[0]} -> {AO};
+    my $VAF = $AO/($RO+$AO);
+	my $QR = $a->{GT} -> {$keys[0]} -> {QR};
+	my $QA = $a->{GT} -> {$keys[0]} -> {QA};
+	my $QpA = $QA/$AO;
+	if ($a->{QUAL} < 3000 ) {#print "$RO\t$AO\t$VAF\t$QpA\n";
+		next;
+	}
     if(! defined $VAF) {next;}
     my $check_vaf = vaf($VAF,$tumor_conc);
     if ($check_vaf == 0) {
@@ -259,9 +267,7 @@ sub vaf {
 	my ($VAF, $tumorc) = @_;
 	my $check = 0;
 	if ($VAF/$tumorc > 0.05 && $VAF/$tumorc < 0.4 ) {
-		#if ($array[7] > 0 ) {
 			$check++; 
-		#}
 	}
 	return $check;
 
