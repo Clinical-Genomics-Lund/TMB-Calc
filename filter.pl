@@ -7,7 +7,7 @@ use File::Basename;
 use lib dirname (__FILE__) . "/bin";
 
 my %options= ();
-getopts("hc:st:b:v:e:o:", \%options);
+getopts("hc:st:b:v:e:o:a:", \%options);
 
 if ($options{h}) { my $send = options_manager();}
 
@@ -74,15 +74,21 @@ if (defined $options{s}) {
 
 # OUTPUT FILE IF CHOSEN ####################################################
 my $outputvcf;
-my $out;
+
 if (defined $options{o}) {
 	$outputvcf = $options{o};
-	open(  $out, '>>', $outputvcf) or die "failure failure!";
+	open(  OUT, '>', $outputvcf) or die "failure failure!";
 }
 ############################################################################
 
-
-
+# CALLER ###################################################################
+my $caller;
+if (defined $options{a}) {
+	$caller = $options{a};
+	my %valid = ("sent" => "1", "free" => "1");
+	if (! defined $valid{$caller}) { print STDERR "WRONG CALLER!!!, valid callers are sent and free\n"; exit;}
+}
+############################################################################
 # Some variables coding size needs to be incorporated as a real variable.
 my $pass_filter = 0;
 my $coding_size = 1.421418;
@@ -115,8 +121,8 @@ while (my $row = <$fh5>) {
 close $fh5;
 ############################################################################
 
-
-
+my $ct = 0;
+my $count_indel = 0;
 my $CF = 0;
 my $TGF = 0;
 my $EF = 0;
@@ -126,27 +132,56 @@ my $SF = 0;
 my $c = 0;
  while ( my $a = $vcf->next_var() ) {
     $c++;
-    #print Dumper($a);
+    
+	#print Dumper($a);
     my $ref = $a->{REF};
  	my $alt = $a->{ALT};
     my $pos = $a->{POS};
     my $chrom =  $a->{CHROM};
+	if (length($ref) > 1|| length($alt) > 1) {$count_indel++;}
     #print "$c PEN_______________________ $chrom\t$pos  __________________________\n";
     #if ($c > 10 ) {exit;}
     ## VAF ###########################################################
     ## id of sample is saved as only key for $a->{GT} need to retrieve
-    my @keys = keys %{$a -> {GT}};
-	my $RO = $a->{GT} -> {$keys[0]} -> {RO};
-	my $AO = $a->{GT} -> {$keys[0]} -> {AO};
-    my $VAF = $AO/($RO+$AO);
-	my $QR = $a->{GT} -> {$keys[0]} -> {QR};
-	my $QA = $a->{GT} -> {$keys[0]} -> {QA};
-	my $QpA = $QA/$AO;
-	if ($a->{QUAL} < 3000 ) {#print "$RO\t$AO\t$VAF\t$QpA\n";
-		next;
+	my $VAF;
+	my @keys = keys %{$a -> {GT}};
+	## SENTIEON
+	if ($caller eq "sent") {
+		$VAF = $a->{GT} -> {$keys[0]} -> {AF};
+		my $QC = $a->{GT} -> {$keys[0]} -> {BaseQRankSumPS};
+
+		if (defined $QC) {
+			if($QC < 0) {
+				next;
+			}
+		}
+		elsif ($a->{QUAL} < 1000) {
+			next;
+		}
 	}
+	## FREEBAYES
+	elsif ($caller eq "free") {
+		my $RO = $a->{GT} -> {$keys[0]} -> {RO};
+		my $AO = $a->{GT} -> {$keys[0]} -> {AO};
+    	$VAF = $AO/($RO+$AO);
+
+		## QUALITY CUTOFF ########################################
+		my $QR = $a->{GT} -> {$keys[0]} -> {QR};
+		my $QA = $a->{GT} -> {$keys[0]} -> {QA};
+		my $QpA = $QA/$AO;
+	
+		if ($a->{QUAL} < 500 || $QpA < 20) {#print "$RO\t$AO\t$VAF\t$QpA\n";
+			next;
+		}
+	}
+    
+	
+	
+
+	##########################################################
     if(! defined $VAF) {next;}
-    my $check_vaf = vaf($VAF,$tumor_conc);
+	$VAF = $VAF/$tumor_conc;
+    my $check_vaf = vaf($VAF);
     if ($check_vaf == 0) {
         $VF++;
         #print "VAF!\n";
@@ -206,8 +241,13 @@ my $c = 0;
         my $depth_filt = coverage($chrom, $pos, $bam, $depth_cutoff);
         if ($depth_filt == 0) { print   "DEPTH! \n"; }
     }
-
+	
+	if ($ref eq "C" && $alt eq "T") {$ct++;}
 	$pass_filter++;
+
+	if (defined $options{o}) {
+		print OUT "$chrom\t$pos\t$pos\t$VAF\t$max_conq\n";
+	}
 }
 
 print STDERR "Cosmic $CF\t";
@@ -215,7 +255,7 @@ print STDERR "Tumor supp gene $TGF\t";
 print STDERR "ExAC $EF\t";
 print STDERR "VAF $VF\t";
 if (defined $options{s}) {print STDERR "Synonymous $SF\t";}
-print "PASSED $pass_filter/$coding_size\n";
+print STDERR "PASSED $pass_filter/$coding_size\tC>T: $ct\tindel:$count_indel\n";
 
 sub CSQ {
 	my ($alt,$csq,$syn) = @_;
@@ -264,9 +304,9 @@ sub CSQ {
 }
 
 sub vaf {
-	my ($VAF, $tumorc) = @_;
+	my ($VAF) = @_;
 	my $check = 0;
-	if ($VAF/$tumorc > 0.05 && $VAF/$tumorc < 0.4 ) {
+	if ($VAF > 0.05 && $VAF < 0.4 ) {
 			$check++; 
 	}
 	return $check;
@@ -402,50 +442,3 @@ sub max_hash {
     return $max, $score_max;
 }
  
-
-
-
-
-
-
-# # TALLY ALL SAMPLES IN POOL (LEGACY?) ######################################
-# my @all_samples;
-# my $list_samples = "samples.txt";
-# open (my $fh2, '<', $list_samples)
-# 	or die "Could not open file $list_samples";
-# while (my $line = <$fh2>) {
-# 	chomp $line;
-# 	push @all_samples, $line;
-# }
-# close $fh2;
-# my %all;
-# foreach my $file (@all_samples) {
-# 	chomp $file;
-# 	open (my $fh3, '<', $file)
-# 		or die "Could not open file $file";
-# 	if ($file =~ /\S+\/(\S+)\.vcf/) { $file = $1; }
-# 	while (my $line = <$fh3>) {
-# 		chomp $line;
-# 		if ($line =~ /^([0-9XY]{1,2})\t(\d+)\t(\S+|\.)\t(\S+)\t(\S+)\t[\.0-9]+\t/) {
-		
-# 			my $variant = $1.":".$2.":".$5;
-# 			if (defined $all{$variant}) {
-# 				$all{$variant}++;
-# 			}
-# 			else {
-# 				$all{$variant} = 0;
-# 			}	
-# 		}
-# 	}
-# close $fh3;
-# }
-# ############################################################################
-
-
-
-
-
-
-
-
-
