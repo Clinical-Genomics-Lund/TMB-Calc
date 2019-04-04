@@ -86,9 +86,24 @@ my $caller;
 if (defined $options{a}) {
 	$caller = $options{a};
 	my %valid = ("sent" => "1", "free" => "1");
-	if (! defined $valid{$caller}) { print STDERR "WRONG CALLER!!!, valid callers are sent and free\n"; exit;}
+	if (! defined $valid{$caller}) { 
+		print STDERR "WRONG CALLER!!!, valid callers are sent and free\n"; 
+		exit;
+	}
 }
 ############################################################################
+
+# SGZ FILES ################################################################
+my $mut_agg = "tmp.mutagg";
+open (MUT, '>', $mut_agg) or die $!;
+print MUT "\#sample\tmutation\tfrequency\tdepth\tpos\tstatus\tstrand\teffect\n";
+#
+my $purity = "tmp.purity";
+open (PUR, '>', $purity) or die $!;
+print PUR $tumor_conc;
+close PUR;
+############################################################################
+
 # Some variables coding size needs to be incorporated as a real variable.
 my $pass_filter = 0;
 my $coding_size = 1.421418;
@@ -138,6 +153,10 @@ my $c = 0;
  	my $alt = $a->{ALT};
     my $pos = $a->{POS};
     my $chrom =  $a->{CHROM};
+	my $strand = $a->{INFO}->{CSQ}->[0]->{STRAND};
+	if ($strand > 0) { $strand = "+";}
+	elsif ($strand < 0) { $strand = "-";}
+	my $hgnc_id = $a->{INFO}->{CSQ}->[0]->{HGNC_ID};
 	if (length($ref) > 1|| length($alt) > 1) {$count_indel++;}
     #print "$c PEN_______________________ $chrom\t$pos  __________________________\n";
     #if ($c > 10 ) {exit;}
@@ -145,11 +164,12 @@ my $c = 0;
     ## id of sample is saved as only key for $a->{GT} need to retrieve
 	my $VAF;
 	my @keys = keys %{$a -> {GT}};
+	my $DEPTH; 
 	## SENTIEON
 	if ($caller eq "sent") {
 		$VAF = $a->{GT} -> {$keys[0]} -> {AF};
 		my $QC = $a->{GT} -> {$keys[0]} -> {BaseQRankSumPS};
-
+		$DEPTH = $a->{GT} -> {$keys[0]} -> {AFDP};
 		if (defined $QC) {
 			if($QC < 0) {
 				next;
@@ -164,7 +184,7 @@ my $c = 0;
 		my $RO = $a->{GT} -> {$keys[0]} -> {RO};
 		my $AO = $a->{GT} -> {$keys[0]} -> {AO};
     	$VAF = $AO/($RO+$AO);
-
+		$DEPTH = $a->{GT} -> {$keys[0]} -> {DP};
 		## QUALITY CUTOFF ########################################
 		my $QR = $a->{GT} -> {$keys[0]} -> {QR};
 		my $QA = $a->{GT} -> {$keys[0]} -> {QA};
@@ -174,14 +194,23 @@ my $c = 0;
 			next;
 		}
 	}
-    
-	
-	
+
+
+    # FIND CONSENSUS CONSEQUENCE AND SCORE ######
+    my $csq = $a->{INFO}->{CSQ};
+    my ($max_conq, $score_conq) = CSQ($alt,$csq);
+    #############################################
+
+
+
+	my $sgz = "$keys[0]\t$hgnc_id:DUMMY:$ref.$pos>$alt\_p.DUMMY\t";
+	$sgz = $sgz."$VAF\t$DEPTH\tchr$chrom:$pos\tunknown\t$strand\t$max_conq\n";
+	print MUT $sgz;
 
 	##########################################################
     if(! defined $VAF) {next;}
 	$VAF = $VAF/$tumor_conc;
-    my $check_vaf = vaf($VAF);
+    my $check_vaf = vaf($VAF,$tumor_conc);
     if ($check_vaf == 0) {
         $VF++;
         #print "VAF!\n";
@@ -189,20 +218,9 @@ my $c = 0;
     }
     ##################################################################
 
-    ## REMOVE COSMIC VARIANTS ###########
-	if (defined $COSMIC{"$chrom:$pos"}) { 
-    	if ($alt eq $COSMIC{"$chrom:$pos"} ) {
-            $CF++;
-            #print "COSMIC!\n";
-            next;
-        }
-    }
-    ######################################
 
-    # FIND CONSENSUS CONSEQUENCE AND SCORE ######
-    my $csq = $a->{INFO}->{CSQ};
-    my ($max_conq, $score_conq) = CSQ($alt,$csq);
-    #############################################
+
+
 
     ## SYNONYMOUS VARIANTS REMOVE IF OPTION -s ###
     if (defined $options{s}) {
@@ -215,7 +233,6 @@ my $c = 0;
     ###############################################
 
     ## Check if tumor suppressor gene ###################
-    my $hgnc_id = $a->{INFO}->{CSQ}->[0]->{HGNC_ID};
     my $is_tumor = 0;
     if (defined $tumor_SUPP{$hgnc_id}) { $is_tumor = 1;}
     if ($score_conq < 2 && $is_tumor == 1) {
@@ -224,6 +241,16 @@ my $c = 0;
         next;
     } 
     #####################################################
+
+    ## REMOVE COSMIC VARIANTS ###########
+	if (defined $COSMIC{"$chrom:$pos"}) { 
+    	if ($alt eq $COSMIC{"$chrom:$pos"} ) {
+            $CF++;
+            #print "COSMIC!\n";
+            next;
+        }
+    }
+    ######################################
 
     ## ExAC cutoff ##############################################
     my $exac_maf = $a->{INFO}->{CSQ}->[0]->{ExAC_MAF};
@@ -250,13 +277,21 @@ my $c = 0;
 	}
 }
 
+
+
+################################
 print STDERR "Cosmic $CF\t";
 print STDERR "Tumor supp gene $TGF\t";
 print STDERR "ExAC $EF\t";
 print STDERR "VAF $VF\t";
 if (defined $options{s}) {print STDERR "Synonymous $SF\t";}
 print STDERR "PASSED $pass_filter/$coding_size\tC>T: $ct\tindel:$count_indel\n";
+################################
 
+
+#							  #
+#          SUBOUTINES         #
+#							  #
 sub CSQ {
 	my ($alt,$csq,$syn) = @_;
     
@@ -304,9 +339,9 @@ sub CSQ {
 }
 
 sub vaf {
-	my ($VAF) = @_;
+	my ($VAF,$tumor_conc) = @_;
 	my $check = 0;
-	if ($VAF > 0.05 && $VAF < 0.4 ) {
+	if ($VAF > 0.05 && $VAF < $tumor_conc ) {
 			$check++; 
 	}
 	return $check;
