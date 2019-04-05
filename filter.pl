@@ -7,7 +7,7 @@ use File::Basename;
 use lib dirname (__FILE__) . "/bin";
 
 my %options= ();
-getopts("hc:st:b:v:e:o:a:", \%options);
+getopts("h:st:d:v:e:o:a:", \%options);
 
 if ($options{h}) { my $send = options_manager();}
 
@@ -29,16 +29,9 @@ my $vcf = CMD::vcf2->new('file'=> $vcf_file );
 # HANDLE BAM ###############################################################
 my $bam;
 my $depth_cutoff;
-if (defined $options{b}) { 
-	if (defined $options{c}) {
-		$bam = $options{b};
-		$depth_cutoff = $options{c};
-		print STDERR "-b $bam -c $depth_cutoff ";
-	}  
-	else {
-		print STDERR "missing coverage -c value\n"; 
-		exit;
-	}
+if (defined $options{d}) { 
+	$depth_cutoff = $options{d};
+	print STDERR "-d $depth_cutoff ";
 }
 ############################################################################
 
@@ -94,22 +87,20 @@ if (defined $options{a}) {
 ############################################################################
 
 # SGZ FILES ################################################################
-my $mut_agg = "tmp.mutagg";
+my $mut_agg = "test_runs_output/$caller.mutagg";
 open (MUT, '>', $mut_agg) or die $!;
 print MUT "\#sample\tmutation\tfrequency\tdepth\tpos\tstatus\tstrand\teffect\n";
 #
-my $purity = "tmp.purity";
+my $purity = "test_runs_output/$caller.purity";
 open (PUR, '>', $purity) or die $!;
 print PUR $tumor_conc;
 close PUR;
 ############################################################################
 
-# Some variables coding size needs to be incorporated as a real variable.
+# Some variables coding size needs to be incorporated as a real variable. ##
 my $pass_filter = 0;
 my $coding_size = 1.421418;
-my $notfilt = 0;
-my $filt = 0;
-
+############################################################################
 
 # TUMOR SUPPRESSOR GENES FILTER HASH #######################################
 my $tumor_sup = "supporting_files/tumor_suppressor_genes.txt";
@@ -123,6 +114,7 @@ while (my $row = <$fh4>) {
 }
 close $fh4;
 ############################################################################
+
 # COSMIC SOMATIC VARIANTS FILTER HASH ######################################
 my $cosmic = "supporting_files/b37_cosmic_v54_120711.vcf";
 open (my $fh5, '<', $cosmic) or  die "Could not open $cosmic";
@@ -175,7 +167,7 @@ my $c = 0;
 				next;
 			}
 		}
-		elsif ($a->{QUAL} < 1000) {
+		elsif ($a->{QUAL} < 500 ) {
 			next;
 		}
 	}
@@ -190,8 +182,8 @@ my $c = 0;
 		my $QA = $a->{GT} -> {$keys[0]} -> {QA};
 		my $QpA = $QA/$AO;
 	
-		if ($a->{QUAL} < 500 || $QpA < 20) {#print "$RO\t$AO\t$VAF\t$QpA\n";
-			next;
+		if ($a->{QUAL} < 1 ) {#print "$RO\t$AO\t$VAF\t$QpA\n";
+			#next;
 		}
 	}
 
@@ -201,11 +193,6 @@ my $c = 0;
     my ($max_conq, $score_conq) = CSQ($alt,$csq);
     #############################################
 
-
-
-	my $sgz = "$keys[0]\t$hgnc_id:DUMMY:$ref.$pos>$alt\_p.DUMMY\t";
-	$sgz = $sgz."$VAF\t$DEPTH\tchr$chrom:$pos\tunknown\t$strand\t$max_conq\n";
-	print MUT $sgz;
 
 	##########################################################
     if(! defined $VAF) {next;}
@@ -264,18 +251,47 @@ my $c = 0;
     #############################################################
     my $variant = $chrom.":".$pos;
 
-    if (defined $options{b}) {
-        my $depth_filt = coverage($chrom, $pos, $bam, $depth_cutoff);
-        if ($depth_filt == 0) { print   "DEPTH! \n"; }
-    }
-	
-	if ($ref eq "C" && $alt eq "T") {$ct++;}
-	$pass_filter++;
+	## DEPTH ########################################################
+    if (defined $options{d}) {
+        #my $depth_filt = coverage($chrom, $pos, $bam, $depth_cutoff);
+        #if ($depth_filt == 0) { print   "DEPTH! \n"; }
+		if ($DEPTH < $depth_cutoff ) {
+			next;
+		}
 
+    }
+	#################################################################
+
+	## COUNT C>T SUBSTITIONS ###############
+	if ($ref eq "C" && $alt eq "T") {$ct++;}
+	########################################
+	
+	## PASSED #####
+	$pass_filter++;
+	###############
+
+	## WRITE SGZ OUTPUT #######################################################
+	my $sgz = "$keys[0]\t$hgnc_id:DUMMY:$ref.$pos>$alt\_p.DUMMY\t";
+	$sgz = $sgz."$VAF\t$DEPTH\tchr$chrom:$pos\tunknown\t$strand\t$max_conq\n";
+	print MUT $sgz;
+	###########################################################################
+
+	## BED OUTPUT ########################################
 	if (defined $options{o}) {
 		print OUT "$chrom\t$pos\t$pos\t$VAF\t$max_conq\n";
 	}
+	######################################################
+
 }
+
+## SGZ FILTERING ##
+my $sgz_command = "/data/bnf/proj/twist/SFZ/basicSGZ.py test_runs_output/$caller.mutagg -f $caller.purity";
+print STDERR "RUNNING SGZ, calculating somatic and germline variants\n";
+my $run_command = `$sgz_command`;
+## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ##
+
+
+
 
 
 
