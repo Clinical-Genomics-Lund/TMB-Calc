@@ -18,13 +18,14 @@ ID:path/to/sentieon/vcf:path/to/freebayes/vcf:tumorconc
 
 ### Options:
 
-`./tmb_calc_wrapper.pl *coding-size*` *out/path/*
+`./tmb_calc_wrapper.pl *coding-size* *out/path/*`
 
 ## **filter.pl**
 
 ### Options:
 
 `./filter.pl -h`
+
 **-flag** | **description**
 --- | ---
 **-v** | *input VCF REQUIRED*
