@@ -36,7 +36,7 @@ if (defined $options{d}) {
 ############################################################################
 
 # HANDLE EXAC ##############################################################
-my $exac_cutoff = 0.01; #DEFAULT VALUE
+my $exac_cutoff = 0.0001; #DEFAULT VALUE
 if (defined $options{e}) {
 	$exac_cutoff = $options{e};
 	print STDERR "-e $exac_cutoff "
@@ -135,6 +135,8 @@ my $TGF = 0;
 my $EF = 0;
 my $VF = 0;
 my $SF = 0;
+my $DF = 0;
+my $QCF = 0;
 ### MAINSCRIPT ENSUES ###
 my $c = 0;
  while ( my $a = $vcf->next_var() ) {
@@ -168,6 +170,7 @@ my $c = 0;
 			}
 		}
 		elsif ($a->{QUAL} < 500 ) {
+			$QCF++;
 			next;
 		}
 	}
@@ -182,8 +185,9 @@ my $c = 0;
 		my $QA = $a->{GT} -> {$keys[0]} -> {QA};
 		my $QpA = $QA/$AO;
 	
-		if ($a->{QUAL} < 1 ) {#print "$RO\t$AO\t$VAF\t$QpA\n";
-			#next;
+		if ($QpA < 30  ) {
+			$QCF++;
+			next;
 		}
 	}
 
@@ -256,6 +260,7 @@ my $c = 0;
         #my $depth_filt = coverage($chrom, $pos, $bam, $depth_cutoff);
         #if ($depth_filt == 0) { print   "DEPTH! \n"; }
 		if ($DEPTH < $depth_cutoff ) {
+			$DF++;
 			next;
 		}
 
@@ -300,6 +305,8 @@ print STDERR "Cosmic $CF\t";
 print STDERR "Tumor supp gene $TGF\t";
 print STDERR "ExAC $EF\t";
 print STDERR "VAF $VF\t";
+print STDERR "QC $QCF\t";
+if (defined $options{d}) {print STDERR "DEPTH $DF\t";}
 if (defined $options{s}) {print STDERR "Synonymous $SF\t";}
 print STDERR "PASSED $pass_filter/$coding_size\tC>T: $ct\tindel:$count_indel\n";
 ################################

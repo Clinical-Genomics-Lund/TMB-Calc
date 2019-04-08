@@ -1,30 +1,42 @@
 # Tumor Mutational Burden Calculator
 
 ## Requirements:
-* samtools depth in path
 * VCF called by sentieon and annotated with VEP
+* VCF called by Freebayes and annotated with VEP
 * Tumor concentration
+* [SGZ-installation](https://github.com/jsunfmi/SGZ)
 
 
-## Manual:
+## **tmb_calc_wrapper.pl**
+Runs filter.pl for both Sentieon and Freebayes VCF, takes ID, VCF_SENT, VCF_FREEBAYES, TUMOR CONC and coding size in mb as input
+Filters SGZ outputs, and takes the intersect of the two filtered VCFs and presents TMB for each sample
+
+### Input file
+**for each sample:**
+
+ID:path/to/sentieon/vcf:path/to/freebayes/vcf:tumorconc
+
+### Options:
+
+`./tmb_calc_wrapper.pl *coding-size*` *out/path/*
+
+## **filter.pl**
+
+### Options:
 
 `./filter.pl -h`
 
-`OPT	Description`
+*-v*	input VCF REQUIRED
 
-`-v	input VCF REQUIRED`
+*-d*	coverage cutoff *integer*
 
-`-b	input BAM`
+*-t*	tumour concentration *REQUIRED*
 
-`-c	coverage cutoff REQUIRED if -b in use`
+*-s*	exclude Synonymous mutations
 
-`-t	tumour concentration REQUIRED`
+*-e*	ExAC MAF cutoff. Default 0.0001
 
-`-s	include Synonymous mutations`
+*-h*	this help message
 
-`-e	ExAC MAF cutoff. Default 0.01`
-
-`-h	this help message`
-
-`-o	output filtered vcf`
+*-o*	output filtered BED
 
