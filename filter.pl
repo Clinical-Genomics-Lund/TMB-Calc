@@ -7,7 +7,7 @@ use File::Basename;
 use lib dirname (__FILE__) . "/bin";
 
 my %options= ();
-getopts("hc:st:b:v:e:o:", \%options);
+getopts("h:st:d:v:e:o:a:", \%options);
 
 if ($options{h}) { my $send = options_manager();}
 
@@ -29,21 +29,14 @@ my $vcf = CMD::vcf2->new('file'=> $vcf_file );
 # HANDLE BAM ###############################################################
 my $bam;
 my $depth_cutoff;
-if (defined $options{b}) { 
-	if (defined $options{c}) {
-		$bam = $options{b};
-		$depth_cutoff = $options{c};
-		print STDERR "-b $bam -c $depth_cutoff ";
-	}  
-	else {
-		print STDERR "missing coverage -c value\n"; 
-		exit;
-	}
+if (defined $options{d}) { 
+	$depth_cutoff = $options{d};
+	print STDERR "-d $depth_cutoff ";
 }
 ############################################################################
 
 # HANDLE EXAC ##############################################################
-my $exac_cutoff = 0.01; #DEFAULT VALUE
+my $exac_cutoff = 0.0001; #DEFAULT VALUE
 if (defined $options{e}) {
 	$exac_cutoff = $options{e};
 	print STDERR "-e $exac_cutoff "
@@ -74,21 +67,40 @@ if (defined $options{s}) {
 
 # OUTPUT FILE IF CHOSEN ####################################################
 my $outputvcf;
-my $out;
+
 if (defined $options{o}) {
 	$outputvcf = $options{o};
-	open(  $out, '>>', $outputvcf) or die "failure failure!";
+	open(  OUT, '>', $outputvcf) or die "failure failure!";
 }
 ############################################################################
 
+# CALLER ###################################################################
+my $caller;
+if (defined $options{a}) {
+	$caller = $options{a};
+	my %valid = ("sent" => "1", "free" => "1");
+	if (! defined $valid{$caller}) { 
+		print STDERR "WRONG CALLER!!!, valid callers are sent and free\n"; 
+		exit;
+	}
+}
+############################################################################
 
+# SGZ FILES ################################################################
+my $mut_agg = "test_runs_output/$caller.mutagg";
+open (MUT, '>', $mut_agg) or die $!;
+print MUT "\#sample\tmutation\tfrequency\tdepth\tpos\tstatus\tstrand\teffect\n";
+#
+my $purity = "test_runs_output/$caller.purity";
+open (PUR, '>', $purity) or die $!;
+print PUR $tumor_conc;
+close PUR;
+############################################################################
 
-# Some variables coding size needs to be incorporated as a real variable.
+# Some variables coding size needs to be incorporated as a real variable. ##
 my $pass_filter = 0;
 my $coding_size = 1.421418;
-my $notfilt = 0;
-my $filt = 0;
-
+############################################################################
 
 # TUMOR SUPPRESSOR GENES FILTER HASH #######################################
 my $tumor_sup = "supporting_files/tumor_suppressor_genes.txt";
@@ -102,6 +114,7 @@ while (my $row = <$fh4>) {
 }
 close $fh4;
 ############################################################################
+
 # COSMIC SOMATIC VARIANTS FILTER HASH ######################################
 my $cosmic = "supporting_files/b37_cosmic_v54_120711.vcf";
 open (my $fh5, '<', $cosmic) or  die "Could not open $cosmic";
@@ -115,29 +128,79 @@ while (my $row = <$fh5>) {
 close $fh5;
 ############################################################################
 
-
-
+my $ct = 0;
+my $count_indel = 0;
 my $CF = 0;
 my $TGF = 0;
 my $EF = 0;
 my $VF = 0;
 my $SF = 0;
+my $DF = 0;
+my $QCF = 0;
 ### MAINSCRIPT ENSUES ###
 my $c = 0;
  while ( my $a = $vcf->next_var() ) {
     $c++;
-    #print Dumper($a);
+    
+	#print Dumper($a);
     my $ref = $a->{REF};
  	my $alt = $a->{ALT};
     my $pos = $a->{POS};
     my $chrom =  $a->{CHROM};
+	my $strand = $a->{INFO}->{CSQ}->[0]->{STRAND};
+	if ($strand > 0) { $strand = "+";}
+	elsif ($strand < 0) { $strand = "-";}
+	my $hgnc_id = $a->{INFO}->{CSQ}->[0]->{HGNC_ID};
+	if (length($ref) > 1|| length($alt) > 1) {$count_indel++;}
     #print "$c PEN_______________________ $chrom\t$pos  __________________________\n";
-    #if ($c > 10000 ) {exit;}
+    #if ($c > 10 ) {exit;}
     ## VAF ###########################################################
     ## id of sample is saved as only key for $a->{GT} need to retrieve
-    my @keys = keys %{$a -> {GT}};
-    my $VAF = $a->{GT} -> {$keys[0]} -> {AF};
+	my $VAF;
+	my @keys = keys %{$a -> {GT}};
+	my $DEPTH; 
+	## SENTIEON
+	if ($caller eq "sent") {
+		$VAF = $a->{GT} -> {$keys[0]} -> {AF};
+		my $QC = $a->{GT} -> {$keys[0]} -> {BaseQRankSumPS};
+		$DEPTH = $a->{GT} -> {$keys[0]} -> {AFDP};
+		if (defined $QC) {
+			if($QC < 0) {
+				next;
+			}
+		}
+		elsif ($a->{QUAL} < 500 ) {
+			$QCF++;
+			next;
+		}
+	}
+	## FREEBAYES
+	elsif ($caller eq "free") {
+		my $RO = $a->{GT} -> {$keys[0]} -> {RO};
+		my $AO = $a->{GT} -> {$keys[0]} -> {AO};
+    	$VAF = $AO/($RO+$AO);
+		$DEPTH = $a->{GT} -> {$keys[0]} -> {DP};
+		## QUALITY CUTOFF ########################################
+		my $QR = $a->{GT} -> {$keys[0]} -> {QR};
+		my $QA = $a->{GT} -> {$keys[0]} -> {QA};
+		my $QpA = $QA/$AO;
+	
+		if ($QpA < 30  ) {
+			$QCF++;
+			next;
+		}
+	}
+
+
+    # FIND CONSENSUS CONSEQUENCE AND SCORE ######
+    my $csq = $a->{INFO}->{CSQ};
+    my ($max_conq, $score_conq) = CSQ($alt,$csq);
+    #############################################
+
+
+	##########################################################
     if(! defined $VAF) {next;}
+	$VAF = $VAF/$tumor_conc;
     my $check_vaf = vaf($VAF,$tumor_conc);
     if ($check_vaf == 0) {
         $VF++;
@@ -146,20 +209,9 @@ my $c = 0;
     }
     ##################################################################
 
-    ## REMOVE COSMIC VARIANTS ###########
-	if (defined $COSMIC{"$chrom:$pos"}) { 
-    	if ($alt eq $COSMIC{"$chrom:$pos"} ) {
-            $CF++;
-            #print "COSMIC!\n";
-            next;
-        }
-    }
-    ######################################
 
-    # FIND CONSENSUS CONSEQUENCE AND SCORE ######
-    my $csq = $a->{INFO}->{CSQ};
-    my ($max_conq, $score_conq) = CSQ($alt,$csq);
-    #############################################
+
+
 
     ## SYNONYMOUS VARIANTS REMOVE IF OPTION -s ###
     if (defined $options{s}) {
@@ -172,7 +224,6 @@ my $c = 0;
     ###############################################
 
     ## Check if tumor suppressor gene ###################
-    my $hgnc_id = $a->{INFO}->{CSQ}->[0]->{HGNC_ID};
     my $is_tumor = 0;
     if (defined $tumor_SUPP{$hgnc_id}) { $is_tumor = 1;}
     if ($score_conq < 2 && $is_tumor == 1) {
@@ -181,6 +232,16 @@ my $c = 0;
         next;
     } 
     #####################################################
+
+    ## REMOVE COSMIC VARIANTS ###########
+	if (defined $COSMIC{"$chrom:$pos"}) { 
+    	if ($alt eq $COSMIC{"$chrom:$pos"} ) {
+            $CF++;
+            #print "COSMIC!\n";
+            next;
+        }
+    }
+    ######################################
 
     ## ExAC cutoff ##############################################
     my $exac_maf = $a->{INFO}->{CSQ}->[0]->{ExAC_MAF};
@@ -194,21 +255,66 @@ my $c = 0;
     #############################################################
     my $variant = $chrom.":".$pos;
 
-    if (defined $options{b}) {
-        my $depth_filt = coverage($chrom, $pos, $bam, $depth_cutoff);
-        if ($depth_filt == 0) { print   "DEPTH! \n"; }
-    }
+	## DEPTH ########################################################
+    if (defined $options{d}) {
+        #my $depth_filt = coverage($chrom, $pos, $bam, $depth_cutoff);
+        #if ($depth_filt == 0) { print   "DEPTH! \n"; }
+		if ($DEPTH < $depth_cutoff ) {
+			$DF++;
+			next;
+		}
 
+    }
+	#################################################################
+
+	## COUNT C>T SUBSTITIONS ###############
+	if ($ref eq "C" && $alt eq "T") {$ct++;}
+	########################################
+	
+	## PASSED #####
 	$pass_filter++;
+	###############
+
+	## WRITE SGZ OUTPUT #######################################################
+	my $sgz = "$keys[0]\t$hgnc_id:DUMMY:$ref.$pos>$alt\_p.DUMMY\t";
+	$sgz = $sgz."$VAF\t$DEPTH\tchr$chrom:$pos\tunknown\t$strand\t$max_conq\n";
+	print MUT $sgz;
+	###########################################################################
+
+	## BED OUTPUT ########################################
+	if (defined $options{o}) {
+		print OUT "$chrom\t$pos\t$pos\t$VAF\t$max_conq\n";
+	}
+	######################################################
+
 }
 
+## SGZ FILTERING ##
+my $sgz_command = "/data/bnf/proj/twist/SFZ/basicSGZ.py test_runs_output/$caller.mutagg -f $caller.purity";
+print STDERR "RUNNING SGZ, calculating somatic and germline variants\n";
+my $run_command = `$sgz_command`;
+## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ##
+
+
+
+
+
+
+################################
 print STDERR "Cosmic $CF\t";
 print STDERR "Tumor supp gene $TGF\t";
 print STDERR "ExAC $EF\t";
 print STDERR "VAF $VF\t";
+print STDERR "QC $QCF\t";
+if (defined $options{d}) {print STDERR "DEPTH $DF\t";}
 if (defined $options{s}) {print STDERR "Synonymous $SF\t";}
-print "PASSED $pass_filter/$coding_size\n";
+print STDERR "PASSED $pass_filter/$coding_size\tC>T: $ct\tindel:$count_indel\n";
+################################
 
+
+#							  #
+#          SUBOUTINES         #
+#							  #
 sub CSQ {
 	my ($alt,$csq,$syn) = @_;
     
@@ -256,12 +362,10 @@ sub CSQ {
 }
 
 sub vaf {
-	my ($VAF, $tumorc) = @_;
+	my ($VAF,$tumor_conc) = @_;
 	my $check = 0;
-	if ($VAF/$tumorc > 0.05 && $VAF/$tumorc < 0.4 ) {
-		#if ($array[7] > 0 ) {
+	if ($VAF > 0.05 && $VAF < $tumor_conc ) {
 			$check++; 
-		#}
 	}
 	return $check;
 
@@ -396,50 +500,3 @@ sub max_hash {
     return $max, $score_max;
 }
  
-
-
-
-
-
-
-# # TALLY ALL SAMPLES IN POOL (LEGACY?) ######################################
-# my @all_samples;
-# my $list_samples = "samples.txt";
-# open (my $fh2, '<', $list_samples)
-# 	or die "Could not open file $list_samples";
-# while (my $line = <$fh2>) {
-# 	chomp $line;
-# 	push @all_samples, $line;
-# }
-# close $fh2;
-# my %all;
-# foreach my $file (@all_samples) {
-# 	chomp $file;
-# 	open (my $fh3, '<', $file)
-# 		or die "Could not open file $file";
-# 	if ($file =~ /\S+\/(\S+)\.vcf/) { $file = $1; }
-# 	while (my $line = <$fh3>) {
-# 		chomp $line;
-# 		if ($line =~ /^([0-9XY]{1,2})\t(\d+)\t(\S+|\.)\t(\S+)\t(\S+)\t[\.0-9]+\t/) {
-		
-# 			my $variant = $1.":".$2.":".$5;
-# 			if (defined $all{$variant}) {
-# 				$all{$variant}++;
-# 			}
-# 			else {
-# 				$all{$variant} = 0;
-# 			}	
-# 		}
-# 	}
-# close $fh3;
-# }
-# ############################################################################
-
-
-
-
-
-
-
-
-
