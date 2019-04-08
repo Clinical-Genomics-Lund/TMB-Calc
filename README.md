@@ -25,13 +25,13 @@ ID:path/to/sentieon/vcf:path/to/freebayes/vcf:tumorconc
 ### Options:
 
 `./filter.pl -h`
-**-flag**|**description**
----|---
-**-v**|*input VCF REQUIRED*
-**-d**|*coverage cutoff *integer**
-**-t**|*tumour concentration *REQUIRED**
-**-s**|*exclude Synonymous mutations*
-**-e**|*ExAC MAF cutoff. Default 0.0001*
-**-h**|*this help message*
-**-o**|*output filtered BED*
+**-flag** | **description**
+--- | ---
+**-v** | *input VCF REQUIRED*
+**-d** | *coverage cutoff *integer**
+**-t** | *tumour concentration *REQUIRED**
+**-s** | *exclude Synonymous mutations*
+**-e** | *ExAC MAF cutoff. Default 0.0001*
+**-h** | *this help message*
+**-o** | *output filtered BED*
 
